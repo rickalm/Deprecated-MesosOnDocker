@@ -1,0 +1,88 @@
+#cloud-config
+coreos:
+  update:
+    reboot-strategy: off
+
+  units:
+  - name: rexray-install.service
+    command: start
+    content: |
+      [Unit]
+      Description=Installs Rexray Service
+      ConditionPathExists=!/opt/bin/rexray
+      Before=docker.service
+
+      [Service]
+      Type=oneshot
+      ExecStartPre=/usr/bin/curl -o /tmp/rexray-install -sSL https://dl.bintray.com/emccode/rexray/install
+      ExecStart=/bin/sh /tmp/rexray-install
+      ExecStartPost=/bin/rm /tmp/rexray-install
+
+  - name: etcd.service
+    command: stop
+    mask: !!bool true
+
+  - name: update-engine.service
+    command: start
+    mask: !!bool false
+
+  - name: locksmithd.service
+    command: stop
+    mask: !!bool true
+
+  - name: systemd-resolved.service
+    command: stop
+
+  - name: format-var-lib-ephemeral.service
+    command: start
+    content: |-
+      [Unit]
+      Description=Formats the /var/lib ephemeral drive
+      Before=var-lib.mount dbus.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/bash -c "(blkid -t TYPE=ext4 | grep xvdz) || (/usr/sbin/mkfs.ext4 -F /dev/xvdz)"
+
+  - name: var-lib.mount
+    command: start
+    content: |-
+      [Unit]
+      Description=Mount /var/lib
+      Before=dbus.service
+
+      [Mount]
+      What=/dev/xvdz
+      Where=/var/lib
+      Type=ext4
+
+  - name: systemd-journald.service
+    command: restart
+
+  - name: docker.service
+    command: restart
+
+write_files:
+- path: /etc/rexray/config.yml
+  owner: root
+  permissions: 0600
+  content: |-
+    rexray:
+      osDrivers:
+      - linux
+      storageDrivers:
+      - ec2
+      volumeDrivers:
+      - docker
+
+    aws:
+      accessKey: #{REXRAY_ACCESS_KEY}
+      secretKey: #{REXRAY_SECRET_KEY}
+
+- path: /etc/mesos.cluster
+  owner: root
+  permissions: 0600
+  content: |-
+    #{CLUSTER_NAME}
+
